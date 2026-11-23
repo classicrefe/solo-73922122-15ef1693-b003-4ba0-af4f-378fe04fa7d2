@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h2>封账</h2>
+  <p>当前待结月：<strong>{{ pending }}</strong>。只能封当前待结月，成功后自动进入次月。</p>
+  <h3>本期归档预览（仅为净变动组合）</h3>
+  <p>本期批次 {{ preview.batch_count }} 个，涉及赔案 {{ preview.claim_count }} 笔，
+     净变动组合 {{ preview.combos|length }} 个。</p>
+  {% if preview.combos %}
+  <table>
+    <thead><tr><th>事故月</th><th>支付月</th><th>净变动(分)</th></tr></thead>
+    <tbody>
+    {% for acc, pay, net in preview.combos %}
+      <tr><td>{{ acc }}</td><td>{{ pay }}</td><td class="num">{{ net }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted">本期无净变动，封账后将不产生归档行。</p>{% endif %}
+  <form method="post">
+    <label>封账月份（YYYY-MM）：
+      <input name="close_month" value="{{ pending }}" required>
+    </label>
+    <button type="submit">确认封账</button>
+  </form>
+</section>
+{% endblock %}

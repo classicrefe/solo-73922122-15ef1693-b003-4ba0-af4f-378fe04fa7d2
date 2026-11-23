@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h2>当前待结月</h2>
+  {% if pending %}
+    <p class="big">{{ pending }}</p>
+    <p><a class="btn" href="{{ url_for('main.import_csv') }}">导入赔款</a>
+       <a class="btn" href="{{ url_for('main.close') }}">封账 {{ pending }}</a></p>
+  {% else %}
+    <p>尚未设置待结月。<a class="btn" href="{{ url_for('main.setup') }}">设置首个待结月</a></p>
+  {% endif %}
+  <p class="muted">赔款当前共 {{ stat.n }} 笔，合计 {{ '{:,}'.format(stat.s) }} 分。</p>
+</section>
+
+<section class="card">
+  <h2>已结月份</h2>
+  {% if closes %}
+  <table>
+    <thead><tr><th>封账月</th><th>批次数</th><th>归档组合数</th><th>封账时间(UTC)</th><th>操作</th></tr></thead>
+    <tbody>
+    {% for c in closes %}
+      <tr>
+        <td>{{ c.close_month }}</td>
+        <td class="num">{{ c.batch_count }}</td>
+        <td class="num">{{ c.combo_count }}</td>
+        <td>{{ c.closed_at }}</td>
+        <td>
+          <a href="{{ url_for('main.triangle', close=c.close_month) }}">三角回查</a> ·
+          <a href="{{ url_for('main.archive', close_month=c.close_month) }}">归档明细</a>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted">暂无。</p>{% endif %}
+</section>
+
+<section class="card">
+  <h2>最近导入批次</h2>
+  {% if batches %}
+  <table>
+    <thead><tr><th>批次</th><th>计入期间</th><th>笔数</th><th>金额合计(分)</th><th>覆盖重报</th><th>导入时间(UTC)</th></tr></thead>
+    <tbody>
+    {% for b in batches %}
+      <tr>
+        <td>#{{ b.id }}</td>
+        <td>{{ b.period_month }}</td>
+        <td class="num">{{ b.row_count }}</td>
+        <td class="num">{{ '{:,}'.format(b.total_cents) }}</td>
+        <td class="num">{{ b.overwritten }}</td>
+        <td>{{ b.created_at }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted">暂无。</p>{% endif %}
+</section>
+{% endblock %}

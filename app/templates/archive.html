@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h2>{{ close_month }} 期归档明细</h2>
+  <p class="muted">本期仅归档净变动非零的（事故月 × 支付月）组合，单位：分。</p>
+  {% if rows %}
+  <table>
+    <thead><tr><th>事故月</th><th>支付月</th><th>净变动(分)</th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr>
+        <td>{{ r.accident_month }}</td>
+        <td>{{ r.payment_month }}</td>
+        <td class="num">{{ '{:+,}'.format(r.net_cents) }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+    <tfoot><tr><th colspan="2">合计</th><td class="num">{{ '{:+,}'.format(total) }}</td></tr></tfoot>
+  </table>
+  {% else %}<p class="muted">本期无净变动组合。</p>{% endif %}
+  <p><a href="{{ url_for('main.triangle', close=close_month) }}">回查 {{ close_month }} 期三角 →</a></p>
+</section>
+{% endblock %}

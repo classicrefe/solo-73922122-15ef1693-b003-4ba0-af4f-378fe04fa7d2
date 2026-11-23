@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h2>待结月设置</h2>
+  {% if locked %}
+    <p>当前待结月：<strong>{{ pending }}</strong></p>
+    <p class="muted">已存在批次或封账数据，待结月只能随封账逐月推进，不能再修改。</p>
+  {% else %}
+    {% if pending %}<p>当前待结月：<strong>{{ pending }}</strong>（尚无数据，可修改）</p>{% endif %}
+    <form method="post">
+      <label>首个待结月（YYYY-MM）：
+        <input name="pending_month" placeholder="2026-01" value="{{ pending or '' }}" required>
+      </label>
+      <button type="submit">保存</button>
+    </form>
+  {% endif %}
+</section>
+{% endblock %}

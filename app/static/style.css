@@ -1,0 +1,34 @@
+* { box-sizing: border-box; }
+body { margin: 0; font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+       background: #f4f6f8; color: #222; }
+header { background: #1f3a5f; color: #fff; padding: 12px 24px; }
+header h1 { margin: 0 0 8px; font-size: 20px; }
+header h1 a { color: #fff; text-decoration: none; }
+nav a { color: #cfe0f5; margin-right: 16px; text-decoration: none; }
+nav a:hover { color: #fff; text-decoration: underline; }
+main { max-width: 1080px; margin: 20px auto; padding: 0 16px; }
+footer { text-align: center; color: #999; font-size: 12px; padding: 16px; }
+.card { background: #fff; border: 1px solid #e2e6ea; border-radius: 8px;
+        padding: 16px 20px; margin-bottom: 20px; }
+.card h2 { margin-top: 0; font-size: 17px; }
+.big { font-size: 28px; font-weight: 700; margin: 8px 0; }
+.muted { color: #777; }
+table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+th, td { border: 1px solid #dde3e8; padding: 6px 10px; text-align: left; font-size: 14px; }
+th { background: #f0f4f8; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+table.triangle td.na { background: #f6f6f6; color: #bbb; text-align: center; }
+table.triangle td.blank { background: #fafbfc; }
+table.triangle td.num { text-align: right; }
+.btn, button { display: inline-block; background: #1f6feb; color: #fff; border: none;
+               border-radius: 6px; padding: 7px 16px; font-size: 14px; cursor: pointer;
+               text-decoration: none; }
+.btn:hover, button:hover { background: #1a5fd0; }
+.flash { border-radius: 6px; padding: 10px 14px; margin-bottom: 14px; font-size: 14px; }
+.flash.ok { background: #e6f6e6; border: 1px solid #9ed69e; color: #1d6b1d; }
+.flash.error { background: #fdecea; border: 1px solid #f2a9a0; color: #a12c1f; }
+ul.errors li { color: #a12c1f; font-size: 14px; }
+form.inline label { margin-right: 14px; }
+input, select, textarea { font-size: 14px; padding: 5px 8px; border: 1px solid #c9d2da;
+                          border-radius: 5px; }
+code { background: #f0f4f8; padding: 1px 5px; border-radius: 4px; }

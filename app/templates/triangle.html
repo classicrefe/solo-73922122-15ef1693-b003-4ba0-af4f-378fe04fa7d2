@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h2>赔付发展三角回查</h2>
+  <form method="get" class="inline">
+    <label>起始事故月：
+      <select name="start">
+        {% for m in start_options %}
+        <option value="{{ m }}" {% if m == start %}selected{% endif %}>{{ m }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>已结月：
+      <select name="close">
+        {% for m in closes %}
+        <option value="{{ m }}" {% if m == close_m %}selected{% endif %}>{{ m }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="submit">查询</button>
+  </form>
+  <p class="muted">按 {{ close_m }} 封账时的归档汇总重建（只读）。单位：分。
+     “—”＝事故月之前；空白＝封账月之后。</p>
+  <table class="triangle">
+    <thead>
+      <tr><th>事故月 \ 支付月</th>{% for col in data.columns %}<th>{{ col }}</th>{% endfor %}</tr>
+    </thead>
+    <tbody>
+    {% for row in data.rows %}
+      <tr>
+        <th>{{ row.accident }}</th>
+        {% for cell in row.cells %}
+          {% if cell.kind == 'na' %}<td class="na">—</td>
+          {% elif cell.kind == 'blank' %}<td class="blank"></td>
+          {% else %}<td class="num">{{ cell.text }}</td>{% endif %}
+        {% endfor %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

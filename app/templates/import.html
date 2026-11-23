@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <h2>导入赔款 CSV</h2>
+  <p>当前待结月：<strong>{{ pending }}</strong>。本批将计入 {{ pending }} 期封账；
+     支付月须在事故月至 {{ pending }} 之间（含首尾）。</p>
+  <details>
+    <summary>CSV 格式说明</summary>
+    <p>表头四列（顺序不限，支持常见别名）：<code>claim_no,accident_month,payment_month,amount_cents</code></p>
+    <ul>
+      <li>claim_no：赔款号，每批内唯一；与历史批次同号则整笔覆盖（可改事故月、支付月、金额）。</li>
+      <li>accident_month / payment_month：YYYY-MM。</li>
+      <li>amount_cents：非负整数，单位分。</li>
+      <li>任一行非法则整批拒绝，不留部分结果。</li>
+    </ul>
+  </details>
+  <form method="post" enctype="multipart/form-data">
+    <p><label>选择文件：<input type="file" name="file" accept=".csv,text/csv"></label></p>
+    <p><label>或粘贴内容：<br>
+      <textarea name="csv_text" rows="8" cols="72"
+        placeholder="claim_no,accident_month,payment_month,amount_cents"></textarea></label></p>
+    <button type="submit">导入</button>
+  </form>
+</section>
+
+{% if errors %}
+<section class="card">
+  <h2>导入失败（整批未写入）</h2>
+  <ul class="errors">{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul>
+</section>
+{% endif %}
+
+{% if result %}
+<section class="card">
+  <h2>导入结果</h2>
+  <table>
+    <tr><th>批次号</th><td>#{{ result.batch_id }}</td></tr>
+    <tr><th>计入期间</th><td>{{ result.period_month }}</td></tr>
+    <tr><th>笔数</th><td class="num">{{ result.row_count }}</td></tr>
+    <tr><th>金额合计(分)</th><td class="num">{{ '{:,}'.format(result.total_cents) }}</td></tr>
+    <tr><th>覆盖重报笔数</th><td class="num">{{ result.overwritten }}</td></tr>
+  </table>
+</section>
+{% endif %}
+{% endblock %}
