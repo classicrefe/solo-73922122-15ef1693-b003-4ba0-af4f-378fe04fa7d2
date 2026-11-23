@@ -6,6 +6,13 @@
   <h3>本期归档预览（仅为净变动组合）</h3>
   <p>本期批次 {{ preview.batch_count }} 个，涉及赔案 {{ preview.claim_count }} 笔，
      净变动组合 {{ preview.combos|length }} 个。</p>
+  <p>当前额外留存的逐笔副本：<strong>{{ preview.snapshot_count }}</strong> 份
+     <span class="muted">（仅与上次封账相比事故月/支付月/金额有变化的赔款各留一份；
+     封账成功后释放本期副本）</span></p>
+  {% if preview.legacy %}
+  <p class="flash error">此库为旧版结构（升级未完成），暂按每笔已结赔款逐笔快照封账；
+     升级成功后会自动只留变化项。</p>
+  {% endif %}
   {% if preview.combos %}
   <table>
     <thead><tr><th>事故月</th><th>支付月</th><th>净变动(分)</th></tr></thead>

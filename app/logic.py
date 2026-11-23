@@ -5,12 +5,23 @@
   BEGIN IMMEDIATE 单事务内完成；SQLite 同时串行化写者。导入与封账重叠时，
   谁先提交谁先进库：批次按提交时的待结月计入本期或下期，失败整体回滚，
   不留部分结果。
+
+逐笔副本（claim_archived）约定（当前结构）：
+- 副本只保存「上次封账值」，且只给与上次封账相比事故月 / 支付月 / 金额有变化的
+  赔款留一份；未变化的已结赔款以 claims 当前值即基线，不占副本。
+- 未封过账的新赔款没有基线，导入时不留副本，封账时按全额计入本期变动。
+- 同号反复重报：副本始终保留上次封账值；最终值改回上次封账值时释放副本。
+- 成功封账后释放本期副本（新值成为下次基线）；导入或封账失败则整体回滚，
+  副本保持原状。
+- 旧库升级失败时 claims 没有 ever_closed 列，自动退回旧版「每笔已结赔款一份
+  快照」逻辑，仍可正常封账。
 """
 import csv
 import io
 import re
 import threading
 
+from .db import claims_have_ever_closed
 from .months import month_range, next_month, parse_month
 
 WRITE_LOCK = threading.Lock()
@@ -150,7 +161,11 @@ def parse_csv_text(text, pending):
 
 
 def apply_batch(conn, rows):
-    """整批写入（同号整笔覆盖）。调用方须持有 WRITE_LOCK。失败整体回滚。"""
+    """整批写入（同号整笔覆盖）。调用方须持有 WRITE_LOCK。失败整体回滚。
+
+    当前结构下同时维护「变化副本」：仅当已结赔款的新值与上次封账值不同，才保留
+    一份上次封账值；新赔款不占副本；改回上次封账值则立即释放副本。
+    """
     conn.execute("BEGIN IMMEDIATE")
     try:
         pend = get_pending(conn)
@@ -162,6 +177,7 @@ def apply_batch(conn, rows):
                 raise BatchError([
                     f"支付月 {r['payment_month']} 晚于当前待结月 {pend}（期间封账已推进，请重新提交）"
                 ])
+        legacy = _is_legacy(conn)
         total = sum(r["amount_cents"] for r in rows)
         cur = conn.execute(
             "INSERT INTO batches(period_month, row_count, total_cents, overwritten) VALUES(?,?,?,0)",
@@ -170,7 +186,8 @@ def apply_batch(conn, rows):
         batch_id = cur.lastrowid
         overwritten = 0
         for r in rows:
-            if conn.execute("SELECT 1 FROM claims WHERE claim_no = ?", (r["claim_no"],)).fetchone():
+            old = _get_claim(conn, r["claim_no"], legacy)
+            if old is not None:
                 overwritten += 1
             conn.execute(
                 "INSERT INTO claims(claim_no, accident_month, payment_month, amount_cents, batch_id)"
@@ -182,6 +199,8 @@ def apply_batch(conn, rows):
                 "   batch_id       = excluded.batch_id",
                 (r["claim_no"], r["accident_month"], r["payment_month"], r["amount_cents"], batch_id),
             )
+            if not legacy:
+                _sync_snapshot(conn, old, r)
         conn.execute("UPDATE batches SET overwritten = ? WHERE id = ?", (overwritten, batch_id))
         conn.commit()
         return {"batch_id": batch_id, "period_month": pend, "row_count": len(rows),
@@ -191,8 +210,52 @@ def apply_batch(conn, rows):
         raise
 
 
-def rows_iter(rows):
-    return iter(rows)
+def _is_legacy(conn):
+    """库是否仍为旧结构（升级失败或尚未升级），决定走旧版逐笔快照逻辑。"""
+    return not claims_have_ever_closed(conn)
+
+
+def _get_claim(conn, claim_no, legacy):
+    cols = ("claim_no, accident_month, payment_month, amount_cents"
+            if legacy else
+            "claim_no, accident_month, payment_month, amount_cents, ever_closed")
+    return conn.execute(
+        f"SELECT {cols} FROM claims WHERE claim_no = ?", (claim_no,)
+    ).fetchone()
+
+
+def _sync_snapshot(conn, old, new):
+    """导入覆盖后维护副本：只留「上次封账值」，且仅当最终值与它不同。
+
+    old 为覆盖前的 claims 行（None 表示新赔款）。未封过账的赔款没有基线，
+    不占副本；已结赔款改回上次封账值则删除副本。
+    """
+    if old is None or not old["ever_closed"]:
+        return
+    baseline = conn.execute(
+        "SELECT accident_month, payment_month, amount_cents FROM claim_archived"
+        " WHERE claim_no = ?", (new["claim_no"],)
+    ).fetchone()
+    if baseline is None:
+        baseline = (old["accident_month"], old["payment_month"], old["amount_cents"])
+    unchanged = (new["accident_month"], new["payment_month"], new["amount_cents"]) == tuple(baseline)
+    if unchanged:
+        conn.execute("DELETE FROM claim_archived WHERE claim_no = ?", (new["claim_no"],))
+    else:
+        conn.execute(
+            "INSERT INTO claim_archived(claim_no, accident_month, payment_month, amount_cents)"
+            " VALUES(?,?,?,?)"
+            " ON CONFLICT(claim_no) DO UPDATE SET"
+            "   accident_month = excluded.accident_month,"
+            "   payment_month  = excluded.payment_month,"
+            "   amount_cents   = excluded.amount_cents",
+            (new["claim_no"], baseline[0], baseline[1], baseline[2]),
+        )
+
+
+def snapshot_count(conn):
+    """当前额外留存的逐笔副本数（每笔至多一份）。"""
+    return conn.execute("SELECT COUNT(*) AS c FROM claim_archived").fetchone()["c"]
 
 
 # ---------------------------------------------------------------- 封账
@@ -200,12 +263,17 @@ def rows_iter(rows):
 def _period_deltas(conn, pend):
     """本期（待结月 = pend）各 (事故月, 支付月) 组合的净变动。
 
-    对本期批次触及的每笔赔案：减去其归档快照（如有），加上当前值。
+    对本期批次触及的每笔赔案：
+    - 当前结构：有副本则减去「上次封账值」；未封过的新赔款基线为 0；
+      已结且无副本说明与上次封账一致，净变动为 0。
+    - 旧结构（升级失败）：对每笔已结赔款都存有快照，直接减去快照。
     返回 (触及赔案行, {组合: 净变动})，净变动为 0 的组合已被剔除。
     """
+    legacy = _is_legacy(conn)
     touched = conn.execute(
-        "SELECT c.claim_no, c.accident_month, c.payment_month, c.amount_cents,"
-        "       a.accident_month AS p_acc, a.payment_month AS p_pay, a.amount_cents AS p_amt"
+        "SELECT c.claim_no, c.accident_month, c.payment_month, c.amount_cents"
+        + ("" if legacy else ", c.ever_closed")
+        + ",       a.accident_month AS p_acc, a.payment_month AS p_pay, a.amount_cents AS p_amt"
         " FROM claims c"
         " JOIN batches b ON b.id = c.batch_id"
         " LEFT JOIN claim_archived a ON a.claim_no = c.claim_no"
@@ -217,6 +285,8 @@ def _period_deltas(conn, pend):
         if t["p_amt"] is not None:
             key = (t["p_acc"], t["p_pay"])
             deltas[key] = deltas.get(key, 0) - t["p_amt"]
+        elif not legacy and t["ever_closed"]:
+            continue  # 已结且与上次封账一致：当前值即基线
         key = (t["accident_month"], t["payment_month"])
         deltas[key] = deltas.get(key, 0) + t["amount_cents"]
     return touched, {k: v for k, v in deltas.items() if v != 0}
@@ -228,11 +298,16 @@ def close_preview(conn, pend):
         "SELECT COUNT(*) AS c FROM batches WHERE period_month = ?", (pend,)
     ).fetchone()["c"]
     items = [(acc, pay, f"{net:+,}") for (acc, pay), net in sorted(deltas.items())]
-    return {"batch_count": batch_count, "claim_count": len(touched), "combos": items}
+    return {"batch_count": batch_count, "claim_count": len(touched), "combos": items,
+            "snapshot_count": snapshot_count(conn), "legacy": _is_legacy(conn)}
 
 
 def close_pending(conn, month):
-    """封当前待结月并推进到次月。调用方须持有 WRITE_LOCK。失败整体回滚。"""
+    """封当前待结月并推进到次月。调用方须持有 WRITE_LOCK。失败整体回滚。
+
+    当前结构：成功后释放本期副本并标记相关赔款已结，下一期以本次封账值为基线；
+    旧结构：为所有触及赔案写入快照（旧版行为）。
+    """
     conn.execute("BEGIN IMMEDIATE")
     try:
         pend = get_pending(conn)
@@ -240,6 +315,7 @@ def close_pending(conn, month):
             raise CloseError("尚未设置待结月")
         if month != pend:
             raise CloseError(f"只能封当前待结月 {pend}，不能封 {month}")
+        legacy = _is_legacy(conn)
         touched, deltas = _period_deltas(conn, pend)
         for (acc, pay), net in sorted(deltas.items()):
             conn.execute(
@@ -247,16 +323,29 @@ def close_pending(conn, month):
                 " VALUES(?,?,?,?)",
                 (pend, acc, pay, net),
             )
-        for t in touched:
-            conn.execute(
-                "INSERT INTO claim_archived(claim_no, accident_month, payment_month, amount_cents)"
-                " VALUES(?,?,?,?)"
-                " ON CONFLICT(claim_no) DO UPDATE SET"
-                "   accident_month = excluded.accident_month,"
-                "   payment_month  = excluded.payment_month,"
-                "   amount_cents   = excluded.amount_cents",
-                (t["claim_no"], t["accident_month"], t["payment_month"], t["amount_cents"]),
+        if legacy:
+            for t in touched:
+                conn.execute(
+                    "INSERT INTO claim_archived(claim_no, accident_month, payment_month, amount_cents)"
+                    " VALUES(?,?,?,?)"
+                    " ON CONFLICT(claim_no) DO UPDATE SET"
+                    "   accident_month = excluded.accident_month,"
+                    "   payment_month  = excluded.payment_month,"
+                    "   amount_cents   = excluded.amount_cents",
+                    (t["claim_no"], t["accident_month"], t["payment_month"], t["amount_cents"]),
+                )
+        else:
+            # 本期及更早批次的赔款均已结；按 <= pend 兜底，历史遗留的过期副本
+            # （对应批次早已封账）也会一并释放，不会长期占位。
+            period_claims = (
+                "SELECT c.claim_no FROM claims c JOIN batches b ON b.id = c.batch_id"
+                " WHERE b.period_month <= ?"
             )
+            conn.execute("UPDATE claims SET ever_closed = 1"
+                         " WHERE claim_no IN (" + period_claims + ")", (pend,))
+            # 释放本期副本：本次封账值成为下期基线，无需再逐笔留档。
+            conn.execute("DELETE FROM claim_archived"
+                         " WHERE claim_no IN (" + period_claims + ")", (pend,))
         batch_count = conn.execute(
             "SELECT COUNT(*) AS c FROM batches WHERE period_month = ?", (pend,)
         ).fetchone()["c"]
